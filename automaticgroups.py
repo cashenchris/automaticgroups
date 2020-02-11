@@ -49,25 +49,36 @@ def certify_hyperbolicity(relator,tryhard=1,generators=None,timeout=10,verbose=F
     else:
         thefilename="OneRelatorGroup-"+relatorasstring+"-"+"".join(generators)
     writetokbmagfile(directory+'/'+thefilename,generators,[relatorasstring])
-    aut=False
-    hyp=False
+    aut=False 
+    hyp=False 
     if verbose:
         print "Attempting to find automatic structure with generator order: "+str(generators)
     try:
-        autrun=subprocess32.run(['autgroup','-silent',directory+'/'+thefilename],check=True,timeout=timeout)
-        aut=True
+        #subprocess32.run(['autgroup','-silent',directory+'/'+thefilename],check=True,timeout=timeout)
+        if 'kbprogargs' in kwargs:
+            kbprogargument=['kbprog']+kwargs['kbprogargs']+[directory+'/'+thefilename]
+        else:
+            kbprogargument=['kbprog','-mt', '20', '-hf', '100', '-cn','0', '-me', '200000', '-silent', '-wd',directory+'/'+thefilename]
+        subprocess32.run(kbprogargument,check=True,timeout=timeout)
+        subprocess32.run(['gpmakefsa',directory+'/'+thefilename],check=True,timeout=timeout)
+        subprocess32.run(['gpaxioms',directory+'/'+thefilename],check=True,timeout=timeout)
+        aut=True # all subprocesses completed in time and with returncode=0
         if verbose:
             print "Automatic structure found."
-    except:
-        pass
+    except (subprocess32.TimeoutExpired,subprocess32.CalledProcessError) as e: # if either autgroup timed out or complete with nonzero returncode
+        if verbose:
+            print "Failed to find automatic structure with error: "+str(e)
+        pass # aut remains False
     if aut:
         try:
             if verbose:
                 print "Checking hyperbolicity."
             hyprun=subprocess32.run(['gpgeowa','-silent',directory+'/'+thefilename],check=True,timeout=timeout)
             hyp=True
-        except:
-            pass
+        except (subprocess32.TimeoutExpired,subprocess32.CalledProcessError) as e:
+            if verbose:
+                print "Failed to find hyperbolic structure with error: "+str(e)
+            pass # hyp remains false
     if cleanup:
         files = glob.glob(directory+'/'+thefilename+"*")
         for file in files:
