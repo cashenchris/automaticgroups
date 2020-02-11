@@ -9,7 +9,7 @@ import itertools
 import copy
 import random
 
-def certify_hyperbolicity(relator,tryhard=1,generators=None,timeout=10,verbose=False,cleanup=True,**kwargs):
+def certify_hyperbolicity(relator,tryhard=1,generators=None,timeout=20,verbose=False,cleanup=True,**kwargs):
     """
     Attempt to check if a one relator group is hyperbolic. 
     If return is True then group is hyperbolic. If return is False then test was inconclusive, try longer timeout.
@@ -60,8 +60,8 @@ def certify_hyperbolicity(relator,tryhard=1,generators=None,timeout=10,verbose=F
         else:
             kbprogargument=['kbprog','-mt', '20', '-hf', '100', '-cn','0', '-me', '200000', '-silent', '-wd',directory+'/'+thefilename]
         subprocess32.run(kbprogargument,check=True,timeout=timeout)
-        subprocess32.run(['gpmakefsa',directory+'/'+thefilename],check=True,timeout=timeout)
-        subprocess32.run(['gpaxioms',directory+'/'+thefilename],check=True,timeout=timeout)
+        subprocess32.run(['gpmakefsa','-silent', directory+'/'+thefilename],check=True,timeout=timeout)
+        subprocess32.run(['gpaxioms','-silent',directory+'/'+thefilename],check=True,timeout=timeout)
         aut=True # all subprocesses completed in time and with returncode=0
         if verbose:
             print "Automatic structure found."
@@ -73,7 +73,7 @@ def certify_hyperbolicity(relator,tryhard=1,generators=None,timeout=10,verbose=F
         try:
             if verbose:
                 print "Checking hyperbolicity."
-            hyprun=subprocess32.run(['gpgeowa','-silent',directory+'/'+thefilename],check=True,timeout=timeout)
+            subprocess32.run(['gpgeowa','-silent',directory+'/'+thefilename],check=True,timeout=timeout)
             hyp=True
         except (subprocess32.TimeoutExpired,subprocess32.CalledProcessError) as e:
             if verbose:
@@ -86,11 +86,10 @@ def certify_hyperbolicity(relator,tryhard=1,generators=None,timeout=10,verbose=F
                 os.remove(file)
             except:
                 pass
-        # sometimes files escape the cleanup. I think this happens because subprocess has timed out and python moves on and tries to cleanup before autgroup finishes and saves its files. Wait and try again.
         if Icreatedthisdirectory:
             try:
                 os.rmdir(directory)
-            except OSError:
+            except OSError:# sometimes files escape the cleanup. I think this happens because subprocess has timed out and python moves on and tries to cleanup before kbprog finishes and saves its files. Wait and try again.
                 time.sleep(5)
                 files = glob.glob(directory+'/'+thefilename+"*")
                 for file in files:
@@ -106,11 +105,6 @@ def certify_hyperbolicity(relator,tryhard=1,generators=None,timeout=10,verbose=F
     if aut and hyp:
         return True
     else:
-        if verbose:
-            if not aut:
-                print "Failed to find automatic structure."
-            elif not hyp:
-                print "Hyperbolicity check did not succeed in allotted time."
         if tryhard==1:
             if verbose:
                 print "Trying again with double wait time."
