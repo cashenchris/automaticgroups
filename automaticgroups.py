@@ -110,7 +110,7 @@ def certify_hyperbolicity(relator,tryhard=1,generators=None,timeout=20,verbose=F
                 print "Trying again with double wait time."
             return certify_hyperbolicity(relator,0,generators,2*timeout,verbose,cleanup,**kwargs)
         if tryhard==2:
-            if verbose==True:
+            if verbose:
                 for i in range(10):
                     orderedgens=random.sample(generators,len(generators))
                     print "Trying kbmag with generator order "+str(orderedgens)
