@@ -9,6 +9,113 @@ import itertools
 import copy
 import random
 
+
+# requires kbmag, available at:   http://homepages.warwick.ac.uk/~mareg/download/kbmag2/
+
+# writetokbmagfile creates a group definition file that kbmag can use.
+# First parameter is filename.
+# Second parameter is list containing generators and their inverses as lowercase/uppercase pairs. Ordering determines shortlex ordering for kbmag.
+# Third parameter is list of relators. 
+
+# >>> G='mytestgroupfilename'
+# >>> writetokbmagfile(G,['B','A','a','b'],['BAba','bb']) 
+# >>> x=groupelement('ababab',G)
+# >>> x
+# Baaa
+# >>> x**(-1)
+# BAAA
+# >>> x**2
+# aaaaaa
+# >>> y=groupelement('b',G)
+# >>> y
+# B
+# >>> x*y
+# aaa
+
+# Warning: kbmag uses group definition file to compute automatic structure, which is saved in separate files with 'mytestgroupfilename' as prefix.
+# groupelement only tells kbmag to generate these files if no files with the appropriate names exist.
+# Overwriting group definition file will NOT trigger recomputation of automatic structure, and groupelement will continue to use the old ones.
+# If you want to change the group  either delete all the old structure files first or choose a unique group filename.
+
+# Warning: Not all groups are automatic.
+
+# >>> writetokbmagfile('mytestgroup2',['B','A','a','b'],['Babaa'])
+# >>> y=groupelement('b','mytestgroup2')
+# TimeoutExpired: Command '['autgroup', '-silent', 'mytestgroup2']' timed out after 30 seconds
+
+# Warning. The above timeout does not always successfully kill the relevant kbmag process. May leave a zombie 'kbprog' process running that you have to terminate manually.
+
+
+class groupelement(object):
+    """
+    Defines an element in an automatric group defined in the kbmag file 'thefilename'.
+    Element represented by self.string which is shortlex minimal representation of that group element as determined by the automatic structure.
+
+    Set location_of_autgroup_binary and location_of_wordreduce_binary if subprocess can't find them in the path.
+    """
+    def __init__(self,thestring,thefilename,location_of_autgroup_binary=None,location_of_wordreduce_binary=None,timeout=30):
+        if os.path.isfile(thefilename):
+            self.groupfilename=thefilename
+            self.location_of_autgroup_binary=location_of_autgroup_binary
+            self.location_of_wordreduce_binary=location_of_wordreduce_binary
+        else:
+            raise NameError('group definition file not found')
+        if not os.path.isfile(thefilename+'.diff1'):
+            if self.location_of_autgroup_binary is None:
+                subprocess32.run(['autgroup','-silent',thefilename],check=True,timeout=timeout)
+            else:
+                subprocess32.run([self.location_of_autgroup_binary,'-silent',thefilename],check=True,timeout=timeout)
+        try:
+            self.string=wordreduce(thestring,thefilename,self.location_of_wordreduce_binary)
+        except OSError:#sometimes wordreduce fails for unknown reasons and it is sufficient to just try again
+            try:
+                self.string=wordreduce(thestring,thefilename,self.location_of_wordreduce_binary)
+            except OSError:
+                try:
+                    self.string=wordreduce(thestring,thefilename,self.location_of_wordreduce_binary)
+                except OSError:
+                    print thestring,thefilename
+                    assert(False)
+                
+    def __str__(self):
+        return self.string
+
+    def __repr__(self):
+        return self.string
+
+    def inverse(self):
+        return groupelement(''.join([x for x in reversed(self.string.swapcase())]),self.groupfilename, self.location_of_autgroup_binary, self.location_of_wordreduce_binary)
+
+    def __pow__(self,thepower):
+        if thepower==0:
+            return groupelement('',self.groupfilename, self.location_of_autgroup_binary, self.location_of_wordreduce_binary)
+        elif thepower<0:
+            return (self.inverse())**(-thepower)
+        else:
+            return groupelement(self.string*thepower,self.groupfilename, self.location_of_autgroup_binary, self.location_of_wordreduce_binary)
+        
+    def __mul__(self,other):
+        return groupelement(self.string+other.string,self.groupfilename, self.location_of_autgroup_binary, self.location_of_wordreduce_binary)
+        
+    def __eq__(self,other):# group elements have unique shortlex min representatives
+        return self.string==other.string
+
+
+def wordreduce(thestring,thefilename,location_of_wordreduce_binary=None):
+    """
+    Given thestring returns the shortlex minimal string representing the same group element as determined by automatic strucure for the group defined in thefilename.
+    """
+    if location_of_wordreduce_binary is None:
+        p=subprocess.Popen(['wordreduce',thefilename],stdin=subprocess.PIPE,stderr = subprocess.STDOUT,stdout=subprocess.PIPE)
+    else:
+        p=subprocess.Popen([location_of_wordreduce_binary,thefilename],stdin=subprocess.PIPE,stderr = subprocess.STDOUT,stdout=subprocess.PIPE)
+    output=p.communicate(addstars(thestring)+';')
+    return removestars((output[0].rstrip('\n'))[95:])
+
+
+    
+
+#----------------- the following are written specifically for 1-relator groups. 
 def certify_hyperbolicity(relator,tryhard=1,generators=None,timeout=20,verbose=False,cleanup=True,**kwargs):
     """
     Attempt to check if a one relator group is hyperbolic. 
@@ -23,7 +130,7 @@ def certify_hyperbolicity(relator,tryhard=1,generators=None,timeout=20,verbose=F
     tryhard=0 just tries given generators and timeout and quits if unsuccessful. 
     tryhard=1 tries once, and if inconclusive tries again with double timeout time
     tryhard=2 tries once, and if inconclusive tries 10 more times with double timeout time and random permutation of generator order
-    tryhard=3 tries once, and if inconclusive tries again with double timeout time and every possible permutaiton of generator order
+    tryhard=3 tries once, and if inconclusive tries again with double timeout time and every possible permutaiton of generator order. This will take a while. 
     """
     if type(relator)==str:
         relatorasstring=relator
@@ -280,70 +387,24 @@ def automatatransitionmatrix(generators=None,relator=None,verbose=False,cleanup=
             os.remove(file)
     return tmat
 
+def smallpole(num,denom,force=False):
+    droots=np.roots(denom)
+    smallrealdenomroot=droots[(droots.imag==0)&(droots.real>0)].real.min()
+    if (not force) and np.isclose(np.polyval(np.array(num).astype(float),smallrealdenomroot),0):
+        raise InputError('It appears that the smallest root '+str(smallrealdenomroot)+' of the denominator is also a root of the numerator.')
+    return smallrealdenomroot
+
+
+def largestrealeigenvalue(M):
+    eigvals=np.linalg.eigvals(M)
+    realeigvals=[x.real for x in eigvals if np.isreal(x)]
+    return max(realeigvals)
 
 
 
 
 
 
-
-def wordreduce(thestring,thefilename):
-    """
-    Given thestring returns the shortlex minimal string representing the same group element as determined by automatic strucure for the group defined in thefilename.
-    """
-    p=subprocess.Popen(['wordreduce',thefilename],stdin=subprocess.PIPE,stderr = subprocess.STDOUT,stdout=subprocess.PIPE)
-    output=p.communicate(addstars(thestring)+';')
-    return removestars((output[0].rstrip('\n'))[95:])
-
-
-class groupelement(object):
-    """
-    Defines an element in an automatric group defined in the kbmag file 'thefilename'.
-    Element represented by self.string which is shortlex minimal representation of that group element as determined by the automatic structure.
-    """
-    def __init__(self,thestring,thefilename):
-        if os.path.isfile(thefilename):
-            self.groupfilename=thefilename
-        else:
-            raise NameError('group file not found')
-        if not os.path.isfile(thefilename+'.diff1'):
-            ec=subprocess.call(['autgroup','-silent',thefilename])
-            if ec!=0:
-                raise RuntimeError('autgroup failed with value '+str(ec))
-        try:
-            self.string=wordreduce(thestring,thefilename)
-        except OSError:#sometimes wordreduce fails for no apparent reason and it is sufficient to just try again
-            try:
-                self.string=wordreduce(thestring,thefilename)
-            except OSError:
-                try:
-                    self.string=wordreduce(thestring,thefilename)
-                except OSError:
-                    print thestring,thefilename
-                    assert(False)
-                
-    def __str__(self):
-        return self.string
-
-    def __repr__(self):
-        return self.string
-
-    def inverse(self):
-        return groupelement(''.join([x for x in reversed(self.string.swapcase())]),self.groupfilename)
-
-    def __pow__(self,thepower):
-        if thepower==0:
-            return groupelement('',self.groupfilename)
-        elif thepower<0:
-            return (self.inverse())**(-thepower)
-        else:
-            return groupelement(self.string*thepower,self.groupfilename)
-        
-    def __mul__(self,other):
-        return groupelement(self.string+other.string,self.groupfilename)
-        
-    def __eq__(self,other):
-        return self.string==other.string
 
 
 #------------------- Auxiliary functions for interacting with kbmag
@@ -420,17 +481,4 @@ def fsagrowthtopolystrings(filename):
     denomend=1+numend+(line[1+numend:]).index(')')
     return sympy.poly(line[1+numbegin:numend]).all_coeffs(),sympy.poly(line[1+denombegin:denomend]).all_coeffs()
 
-def smallpole(num,denom,force=False):
-    droots=np.roots(denom)
-    smallrealdenomroot=droots[(droots.imag==0)&(droots.real>0)].real.min()
-    if (not force) and np.isclose(np.polyval(np.array(num).astype(float),smallrealdenomroot),0):
-        raise InputError('It appears that the smallest root '+str(smallrealdenomroot)+' of the denominator is also a root of the numerator.')
-    return smallrealdenomroot
 
-
-
-
-def largestrealeigenvalue(M):
-    eigvals=np.linalg.eigvals(M)
-    realeigvals=[x.real for x in eigvals if np.isreal(x)]
-    return max(realeigvals)
